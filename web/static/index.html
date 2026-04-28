@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Mafia Arena</title>
+    <meta name="description" content="Multi-Agent Mafia game simulation with AI agents powered by DeepSeek">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="header">
+            <div class="header-content">
+                <h1 class="title">Agent Mafia Arena</h1>
+                <div class="header-controls">
+                    <button id="btn-start" class="btn">Start New Game</button>
+                    <button id="btn-stop" class="btn btn-danger">Stop Server</button>
+                </div>
+                <div class="header-status">
+                    <span id="connection-dot" class="dot disconnected"></span>
+                    <span id="connection-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Left Panel: Players -->
+            <aside id="players-panel" class="panel">
+                <h2 class="panel-title">Players</h2>
+                <div id="players-list"></div>
+            </aside>
+
+            <!-- Center: Game Log -->
+            <main id="game-log-panel" class="panel">
+                <div class="log-header">
+                    <h2 class="panel-title">Game Log</h2>
+                    <div id="phase-badge" class="phase-badge">WAITING</div>
+                </div>
+                <div id="game-log" class="game-log">
+                    <div class="log-entry system">
+                        <span class="log-text">Waiting for game to start...</span>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Right Panel: Info -->
+            <aside id="info-panel" class="panel">
+                <h2 class="panel-title">Game Info</h2>
+                <div id="round-info" class="info-block">
+                    <div class="info-label">Phase</div>
+                    <div id="current-phase" class="info-value">--</div>
+                </div>
+                <div id="votes-section" class="info-block hidden">
+                    <div class="info-label">Vote Tally</div>
+                    <div id="vote-tally"></div>
+                </div>
+                <div id="deaths-section" class="info-block">
+                    <div class="info-label">Graveyard</div>
+                    <div id="graveyard"></div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
