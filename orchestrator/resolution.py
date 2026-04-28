@@ -14,8 +14,13 @@ from agents.base_agent import Agent
 from contracts.intents import Role
 
 
-def _extract_last_mentioned_target(text: str, agents: list[Agent]) -> str | None:
-    """Find the last mentioned agent in the text.
+def _extract_last_mentioned_target(
+    text: str, 
+    agents: list[Agent],
+    none_patterns: list[str] = None,
+    self_patterns: list[str] = None
+) -> str | None:
+    """Find the last mentioned agent or pattern in the text.
     
     This handles cases where an agent mentions multiple names (e.g. reasoning)
     but makes their final decision at the end.
@@ -38,6 +43,18 @@ def _extract_last_mentioned_target(text: str, agents: list[Agent]) -> str | None
                 last_match_idx = matches[-1].start()
                 mentions.append((last_match_idx, agent.display_name))
                 
+    if none_patterns:
+        for pattern in none_patterns:
+            matches = list(re.finditer(r'\b' + re.escape(pattern) + r'\b', text_lower))
+            if matches:
+                mentions.append((matches[-1].start(), None))
+                
+    if self_patterns:
+        for pattern in self_patterns:
+            matches = list(re.finditer(r'\b' + re.escape(pattern) + r'\b', text_lower))
+            if matches:
+                mentions.append((matches[-1].start(), "self"))
+
     if mentions:
         mentions.sort(key=lambda x: x[0], reverse=True)
         return mentions[0][1]
@@ -200,16 +217,8 @@ def parse_vote_target(
     Returns:
         Tuple of (target_name or None, justification string)
     """
-    text_lower = vote_text.lower()
-
-    # Check for "no one" / "nobody" / "abstain"
-    no_vote_patterns = ["no one", "nobody", "abstain", "pass", "skip"]
-    for pattern in no_vote_patterns:
-        if pattern in text_lower:
-            return None, vote_text
-
-    # Try to find the last mentioned player name
-    target = _extract_last_mentioned_target(vote_text, alive_agents)
+    none_patterns = ["no one", "nobody", "abstain", "pass", "skip"]
+    target = _extract_last_mentioned_target(vote_text, alive_agents, none_patterns=none_patterns)
     return target, vote_text
 
 
@@ -228,29 +237,24 @@ def parse_night_action(
     Returns:
         Dict with action details (target, action_type).
     """
-    text_lower = action_text.lower()
-
-    # Check for no action
-    if is_mafia:
-        if any(p in text_lower for p in ["kill none", "no one", "nobody", "skip", "pass"]):
-            return {"action_type": "KILL_NONE", "target": None}
+    none_patterns = ["kill none", "heal none", "no one", "nobody", "skip", "pass"]
+    self_patterns = [] if is_mafia else ["heal myself", "heal self", "protect myself", "save myself", "myself"]
+    
+    target = _extract_last_mentioned_target(
+        action_text, 
+        alive_agents, 
+        none_patterns=none_patterns, 
+        self_patterns=self_patterns
+    )
+    
+    if target == "self":
+        return {"action_type": "HEAL_SELF", "target": "self"}
+    elif target is None:
+        action_type = "KILL_NONE" if is_mafia else "HEAL_NONE"
+        return {"action_type": action_type, "target": None}
     else:
-        if any(p in text_lower for p in ["heal none", "no one", "nobody", "skip", "pass"]):
-            return {"action_type": "HEAL_NONE", "target": None}
-
-        # Check for self-heal
-        if any(p in text_lower for p in ["heal myself", "heal self", "protect myself", "save myself"]):
-            return {"action_type": "HEAL_SELF", "target": "self"}
-
-    # Try to find the last mentioned target name
-    target = _extract_last_mentioned_target(action_text, alive_agents)
-    if target:
         action_type = "KILL_TARGET" if is_mafia else "HEAL_TARGET"
         return {"action_type": action_type, "target": target}
-
-    # Default: no action
-    action_type = "KILL_NONE" if is_mafia else "HEAL_NONE"
-    return {"action_type": action_type, "target": None}
 
 
 def parse_sheriff_investigation(
@@ -266,14 +270,8 @@ def parse_sheriff_investigation(
     Returns:
         The target agent's display name, or None if no valid target.
     """
-    text_lower = action_text.lower()
-
-    # Check for no action
-    if any(p in text_lower for p in ["investigate none", "no one", "nobody", "skip", "pass"]):
-        return None
-
-    # Try to find the last mentioned target name
-    return _extract_last_mentioned_target(action_text, alive_agents)
+    none_patterns = ["investigate none", "no one", "nobody", "skip", "pass"]
+    return _extract_last_mentioned_target(action_text, alive_agents, none_patterns=none_patterns)
 
 
 def parse_sentence_vote(vote_text: str) -> str:
@@ -286,18 +284,26 @@ def parse_sentence_vote(vote_text: str) -> str:
         'guilty' or 'not_guilty'
     """
     text_lower = vote_text.lower()
-
+    
     guilty_patterns = ["guilty", "hang", "execute", "lynch", "condemn", "punish"]
     not_guilty_patterns = ["not guilty", "innocent", "spare", "free", "acquit", "mercy"]
-
-    # Check not_guilty first (has "guilty" as substring)
+    
+    mentions = []
+    
     for pattern in not_guilty_patterns:
-        if pattern in text_lower:
-            return "not_guilty"
-
+        matches = list(re.finditer(r'\b' + re.escape(pattern) + r'\b', text_lower))
+        if matches:
+            mentions.append((matches[-1].start(), "not_guilty"))
+            
     for pattern in guilty_patterns:
-        if pattern in text_lower:
-            return "guilty"
+        # Ensure we don't match "guilty" when it's part of "not guilty"
+        matches = list(re.finditer(r'(?<!not\s)\b' + re.escape(pattern) + r'\b', text_lower))
+        if matches:
+            mentions.append((matches[-1].start(), "guilty"))
 
-    # Default to not guilty if unclear
+    if mentions:
+        mentions.sort(key=lambda x: x[0], reverse=True)
+        return mentions[0][1]
+        
     return "not_guilty"
+

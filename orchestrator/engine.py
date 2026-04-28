@@ -194,6 +194,11 @@ class GameEngine:
         sheriff_task = self._night_sheriff_chain()
         await asyncio.gather(mafia_task, doctor_task, sheriff_task)
         
+        # Pre-calculate the night results so we can handle notepad edge cases
+        kill_target = getattr(self, "_night_kill_target", None)
+        heal_target = getattr(self, "_night_heal_target", None)
+        self._night_result = resolve_night(kill_target, heal_target)
+
         # After night actions, all agents update their notepads
         await self._night_notepad_chain()
 
@@ -351,15 +356,17 @@ class GameEngine:
     async def _night_notepad_chain(self) -> None:
         """All agents update their notepads before Dawn."""
         alive = get_alive_agents(self.agents)
+        victim_name = getattr(self, "_night_result", {}).get("killed")
         
         for agent in alive:
             ctx = {}
             if agent.role == Role.SHERIFF and getattr(self, "_night_sheriff_target", None):
-                target = self._night_sheriff_target
-                target_agent = next((a for a in self.agents if a.display_name == target), None)
-                if target_agent:
-                    role_str = "MAFIA" if target_agent.role == Role.MAFIA else "NOT MAFIA"
-                    ctx["investigation_result"] = f"Investigation result: {target} is {role_str}!"
+                if agent.display_name != victim_name:
+                    target = self._night_sheriff_target
+                    target_agent = next((a for a in self.agents if a.display_name == target), None)
+                    if target_agent:
+                        role_str = "MAFIA" if target_agent.role == Role.MAFIA else "NOT MAFIA"
+                        ctx["investigation_result"] = f"Investigation result: {target} is {role_str}!"
 
             _, notepad_response = await self.handoff.send_and_receive(
                 agent=agent,
@@ -392,10 +399,11 @@ class GameEngine:
         """Resolve night actions and announce results."""
         logger.phase_header("DAWN")
 
-        kill_target = getattr(self, "_night_kill_target", None)
-        heal_target = getattr(self, "_night_heal_target", None)
-
-        result = resolve_night(kill_target, heal_target)
+        result = getattr(self, "_night_result", None)
+        if not result:
+            kill_target = getattr(self, "_night_kill_target", None)
+            heal_target = getattr(self, "_night_heal_target", None)
+            result = resolve_night(kill_target, heal_target)
 
         alive = get_alive_agents(self.agents)
 
@@ -409,9 +417,14 @@ class GameEngine:
                 logger.death_announcement(
                     victim.display_name, victim.role.value, "killed by the Mafia"
                 )
+                
+                announcement = f"{victim.display_name} was found dead this morning. They were a {victim.role.value}."
+                if victim.role in [Role.TOWN, Role.DOCTOR, Role.SHERIFF] and victim.notepad:
+                    announcement += f"\n\nNext to their body, you find their notepad:\n{victim.notepad}"
+
                 await self.handoff.broadcast_system(
                     get_alive_agents(self.agents),
-                    f"{victim.display_name} was found dead this morning. They were a {victim.role.value}.",
+                    announcement,
                     GamePhase.DAWN,
                 )
         elif result["healed"]:
@@ -598,9 +611,9 @@ class GameEngine:
                     ctx["your_previous_vote"] = prev["target"]
 
             payload_text = (
-                "Vote for a player to put on trial, or vote 'no one'. Include your justification."
+                "Vote for a player to put on trial. Provide your reasoning, then write 'vote [name]' or 'vote no one' at the very end."
                 if step == 1 else
-                "You may CHANGE your vote (once) or CONFIRM it. Include reason if changing."
+                "You may CHANGE your vote (once) or CONFIRM it. Provide your reasoning, then write 'vote [name]' or 'vote no one' at the very end."
             )
 
             _, response = await self.handoff.send_and_receive(
@@ -714,7 +727,7 @@ class GameEngine:
                     "accused": accused_name,
                     "defense": defense,
                 },
-                payload={"text": f"Vote 'guilty' or 'not guilty' for {accused_name}."},
+                payload={"text": f"Vote 'guilty' or 'not guilty' for {accused_name}. Provide your reasoning, then write your final decision at the very end."},
                 current_phase=GamePhase.SENTENCING,
                 round_number=self.state_machine.day_number,
             )
@@ -746,9 +759,13 @@ class GameEngine:
             await self.db.kill_agent(accused.name)
             logger.death_announcement(accused.display_name, accused.role.value, "lynched")
 
+            announcement = f"{accused.display_name} has been lynched. They were a {accused.role.value}."
+            if accused.role in [Role.TOWN, Role.DOCTOR, Role.SHERIFF] and accused.notepad:
+                announcement += f"\n\nAmong their belongings, you find their notepad:\n{accused.notepad}"
+
             await self.handoff.broadcast_system(
                 get_alive_agents(self.agents),
-                f"{accused.display_name} has been lynched. They were a {accused.role.value}.",
+                announcement,
                 GamePhase.SENTENCING,
             )
 
